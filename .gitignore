@@ -128,3 +128,9 @@ Untitled.ipynb
 
 # IntelliJ .idea folder
 .idea
+
+# opencode
+AGENTS.md
+.context/*
+opencode.json
+examples/*.csv

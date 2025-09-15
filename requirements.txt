@@ -1,0 +1,19 @@
+# Core dependencies
+pandas>=2.0
+scikit-learn>1.4.2
+numba>0.54
+sparse>=0.9
+matplotlib
+seaborn
+dill
+patsy
+
+# Development and testing dependencies
+lxml
+pytest
+pytest-cov
+pytest-xdist
+jinja2
+ipython
+ipykernel
+dask
