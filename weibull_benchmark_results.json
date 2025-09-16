@@ -1,0 +1,276 @@
+{
+  "normal_cases": [
+    {
+      "test_case": 1,
+      "parameters": {
+        "fit_period": [
+          24,
+          null
+        ],
+        "extrap_periods": 5
+      },
+      "elapsed_time": 0.003362417221069336,
+      "actuarial_valid": "True",
+      "tail_factor": 32.06048908543175,
+      "min_ldf": 1.001,
+      "max_ldf": 16.012950690152717,
+      "math_consistent": "True",
+      "intercept": -1.1917876513520225,
+      "slope": 1.305741907152094
+    },
+    {
+      "test_case": 2,
+      "parameters": {
+        "fit_period": [
+          12,
+          60
+        ],
+        "extrap_periods": 10
+      },
+      "elapsed_time": 0.0024499893188476562,
+      "actuarial_valid": "True",
+      "tail_factor": 1071.5124789810607,
+      "min_ldf": 1.001,
+      "max_ldf": 528.8799502515893,
+      "math_consistent": "True",
+      "intercept": -0.7225165293126564,
+      "slope": 0.8790666305158796
+    },
+    {
+      "test_case": 3,
+      "parameters": {
+        "fit_period": [
+          36,
+          null
+        ],
+        "extrap_periods": 3
+      },
+      "elapsed_time": 0.049225568771362305,
+      "actuarial_valid": "True",
+      "tail_factor": 8.011053846706195,
+      "min_ldf": 1.001,
+      "max_ldf": 4.002010669061606,
+      "math_consistent": "True",
+      "intercept": -1.3292469113914889,
+      "slope": 1.379768542723758
+    }
+  ],
+  "edge_cases": [
+    {
+      "case_type": "minimal_ldfs",
+      "success": true,
+      "elapsed_time": 0.002622842788696289,
+      "actuarial_valid": "True",
+      "tail_factor": 32.17066370940067,
+      "min_ldf": 1.0050251256281406,
+      "parameters_finite": "True",
+      "error": null
+    },
+    {
+      "case_type": "high_volatility",
+      "success": true,
+      "elapsed_time": 0.0025305747985839844,
+      "actuarial_valid": "True",
+      "tail_factor": 33.66272608524993,
+      "min_ldf": 1.0571428571428572,
+      "parameters_finite": "True",
+      "error": null
+    },
+    {
+      "case_type": "small_triangle",
+      "success": true,
+      "elapsed_time": 0.002614736557006836,
+      "actuarial_valid": "True",
+      "tail_factor": 32.63453685485091,
+      "min_ldf": 1.0526315789473684,
+      "parameters_finite": "True",
+      "error": null
+    }
+  ],
+  "parameter_sensitivity": [
+    {
+      "test_name": "fit_period_early",
+      "parameters": {
+        "fit_period": [
+          12,
+          36
+        ]
+      },
+      "success": true,
+      "elapsed_time": 0.0024917125701904297,
+      "tail_factor": 43.75449426337274,
+      "actuarial_valid": "True",
+      "intercept": -0.6726069239328594,
+      "slope": 0.6338702724372833,
+      "error": null
+    },
+    {
+      "test_name": "fit_period_late",
+      "parameters": {
+        "fit_period": [
+          48,
+          null
+        ]
+      },
+      "success": true,
+      "elapsed_time": 0.002631664276123047,
+      "tail_factor": 32.3239819879085,
+      "actuarial_valid": "True",
+      "intercept": -1.3058913333105784,
+      "slope": 1.3507471976917902,
+      "error": null
+    },
+    {
+      "test_name": "fit_period_middle",
+      "parameters": {
+        "fit_period": [
+          24,
+          60
+        ]
+      },
+      "success": true,
+      "elapsed_time": 0.0023355484008789062,
+      "tail_factor": 32.50343131021757,
+      "actuarial_valid": "True",
+      "intercept": -1.064377032411569,
+      "slope": 1.199629428786129,
+      "error": null
+    },
+    {
+      "test_name": "extrap_short",
+      "parameters": {
+        "extrap_periods": 3
+      },
+      "success": true,
+      "elapsed_time": 0.0023844242095947266,
+      "tail_factor": 8.160559419647626,
+      "actuarial_valid": "True",
+      "intercept": -0.8162861391662758,
+      "slope": 1.047978915187645,
+      "error": null
+    },
+    {
+      "test_name": "extrap_long",
+      "parameters": {
+        "extrap_periods": 15
+      },
+      "success": true,
+      "elapsed_time": 0.0024902820587158203,
+      "tail_factor": 33601.32345704174,
+      "actuarial_valid": "True",
+      "intercept": -0.8162861391662758,
+      "slope": 1.047978915187645,
+      "error": null
+    },
+    {
+      "test_name": "tight_threshold",
+      "parameters": {
+        "reg_threshold": [
+          1.001,
+          2.0
+        ]
+      },
+      "success": true,
+      "elapsed_time": 0.002342700958251953,
+      "tail_factor": 32.42007190257452,
+      "actuarial_valid": "True",
+      "intercept": -1.1079668518481363,
+      "slope": 1.2364099598121174,
+      "error": null
+    },
+    {
+      "test_name": "loose_threshold",
+      "parameters": {
+        "reg_threshold": [
+          1.1,
+          null
+        ]
+      },
+      "success": true,
+      "elapsed_time": 0.002701282501220703,
+      "tail_factor": 33.92102139842236,
+      "actuarial_valid": "True",
+      "intercept": -0.7383365417746286,
+      "slope": 0.9125380506110907,
+      "error": null
+    },
+    {
+      "test_name": "early_attachment",
+      "parameters": {
+        "attachment_age": 36
+      },
+      "success": true,
+      "elapsed_time": 0.002368450164794922,
+      "tail_factor": 32.7538703552486,
+      "actuarial_valid": "True",
+      "intercept": -0.8162861391662758,
+      "slope": 1.047978915187645,
+      "error": null
+    },
+    {
+      "test_name": "late_attachment",
+      "parameters": {
+        "attachment_age": 84
+      },
+      "success": true,
+      "elapsed_time": 0.0024487972259521484,
+      "tail_factor": 32.7538703552486,
+      "actuarial_valid": "True",
+      "intercept": -0.8162861391662758,
+      "slope": 1.047978915187645,
+      "error": null
+    }
+  ],
+  "performance_scaling": [
+    {
+      "triangle_size": 5,
+      "avg_time": 0.0025517940521240234,
+      "std_time": 8.535718112183185e-05,
+      "times": [
+        0.0026710033416748047,
+        0.0025086402893066406,
+        0.002475738525390625
+      ]
+    },
+    {
+      "triangle_size": 10,
+      "avg_time": 0.0025368531545003257,
+      "std_time": 0.00010106704521001203,
+      "times": [
+        0.0026793479919433594,
+        0.002475261688232422,
+        0.0024559497833251953
+      ]
+    },
+    {
+      "triangle_size": 15,
+      "avg_time": 0.002636591593424479,
+      "std_time": 2.718831459904798e-05,
+      "times": [
+        0.002663850784301758,
+        0.0026464462280273438,
+        0.002599477767944336
+      ]
+    },
+    {
+      "triangle_size": 20,
+      "avg_time": 0.002461592356363932,
+      "std_time": 0.00016678185773325876,
+      "times": [
+        0.002689838409423828,
+        0.002398967742919922,
+        0.002295970916748047
+      ]
+    }
+  ],
+  "mathematical_properties": {
+    "all_ldfs_geq_one": "True",
+    "min_ldf": 1.001,
+    "tail_convergence": "False",
+    "tail_approaching_one": "False",
+    "parameters_finite": "True",
+    "slope_reasonable": "True",
+    "predictions_valid": "True",
+    "predictions_decreasing": "True"
+  }
+}

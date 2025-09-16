@@ -209,7 +209,7 @@ class TailCurve(TailBase):
             tail_ldf = xp.exp(self._intercept_) * (extrapolate ** self._slope_)
         if self.curve == "weibull":
             tail_ldf = 1/(1-xp.exp(-xp.exp(self._intercept_)
-                          * extrapolate**self._slope_))-1
+                          * extrapolate**self._slope_))
         return self._get_tail_prediction(tail_ldf)
 
     @property
