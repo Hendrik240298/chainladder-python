@@ -231,6 +231,8 @@ class TriangleDisplay:
             self,
             show_by_accident_year: bool = True,
             show_average_pattern: bool = True,
+            show_origin_years_in_legend: bool = True,
+            selected_origins: list = None,
             include_confidence_bands: bool = False,
             figsize: tuple = (12, 8)
     ) -> Figure:
@@ -271,7 +273,18 @@ class TriangleDisplay:
             Whether to display the volume-weighted average development pattern.
             - True: Shows the overall pattern as a prominent line with markers
             - False: Hides the average pattern to focus on individual variations
-            
+
+        show_origin_years_in_legend : bool, default=True
+            Whether to show individual accident years in the legend.
+            - True: Each accident year appears as a separate legend entry (e.g., "1981", "1982")
+            - False: Shows only generic labels ("Individual origin", "Average Pattern")
+
+        selected_origins : list of int or str, optional
+            Specific accident years to plot. If None (default), plots all available origins.
+            Can accept years as integers (1995, 1997) or strings ("1995", "1997").
+            Useful for focusing analysis on specific periods or reducing visual clutter.
+            Example: [1995, 1997, 2005, 2003]
+
         include_confidence_bands : bool, default=False
             Whether to include confidence intervals around the average pattern.
             Note: Currently not implemented but reserved for future enhancement.
@@ -332,6 +345,12 @@ class TriangleDisplay:
         ...     show_average_pattern=True
         ... )
         >>> 
+        >>> # Show individual accident years in legend
+        >>> fig = raa.percent_of_ultimate(show_origin_years_in_legend=True)
+        >>>
+        >>> # Plot specific accident years only
+        >>> fig = raa.percent_of_ultimate(selected_origins=[1985, 1987, 1990])
+        >>>
         >>> # Custom size for reports
         >>> fig = raa.percent_of_ultimate(figsize=(14, 10))
         
@@ -385,9 +404,37 @@ class TriangleDisplay:
             avg_cdf_data = dev_obj.cdf_.compute().set_backend("numpy").values[0, 0, 0]
             development_periods = dev_obj.cdf_.development.copy()
 
-        # ==========================================================================================================
+        # =================================================================
+        # STEP 2.5: VALIDATE AND PROCESS SELECTED ORIGINS
+        # =================================================================
+
+        def _validate_and_process_origins(selected_origins):
+            """Validate and convert selected origins to indices"""
+            if selected_origins is None:
+                return list(range(len(self.origin)))  # All origins
+
+            import warnings
+            available_origins = [str(origin) for origin in self.origin]
+            selected_indices = []
+
+            for origin in selected_origins:
+                origin_str = str(origin)
+                if origin_str in available_origins:
+                    selected_indices.append(available_origins.index(origin_str))
+                else:
+                    warnings.warn(f"Origin {origin} not found in triangle data. Available origins: {available_origins}")
+
+            if not selected_indices:
+                warnings.warn("No valid origins found in selection. Using all origins.")
+                return list(range(len(self.origin)))
+
+            return selected_indices
+
+        selected_origin_indices = _validate_and_process_origins(selected_origins)
+
+        # =================================================================
         # STEP 3: CALCULATE INDIVIDUAL ACCIDENT YEAR PATTERNS
-        # ========================
+        # =================================================================
         
         # Process individual accident year patterns only for raw triangles
         # (fitted objects and CDF triangles already have averaged patterns and don't need individual processing)
@@ -500,6 +547,10 @@ class TriangleDisplay:
 
             for i, (observed_pct, n_observed) in enumerate(individual_percent_ult):
 
+                # Skip this origin if not in selected origins
+                if i not in selected_origin_indices:
+                    continue
+
                 # ---------------------------------------------------------------
                 # Plot Observed Development (Solid Lines Only)
                 # ---------------------------------------------------------------
@@ -515,6 +566,17 @@ class TriangleDisplay:
                         obs_x = relevant_periods[obs_mask]
                         obs_y = observed_pct_array[obs_mask]
 
+                        # Determine label for this accident year
+                        if show_origin_years_in_legend or selected_origins is not None:
+                            # Show the actual accident year in the legend
+                            # (always show origin years when specific origins are selected)
+                            origin_year = str(self.origin[i])
+                            label = origin_year
+                        else:
+                            # Show generic label only for the first selected accident year
+                            first_selected_index = min(selected_origin_indices)
+                            label = 'Individual origin' if i == first_selected_index else ""
+
                         # Plot observed development with professional styling
                         ax.plot(obs_x, obs_y,
                                alpha=0.6,              # Semi-transparent for layering
@@ -522,7 +584,7 @@ class TriangleDisplay:
                                linestyle='-',          # Solid line for observed data
                                marker='o',
                                markersize=4,
-                               label='Individual origin' if i == 0 else "")
+                               label=label)
 
         # Plot average pattern
         if show_average_pattern:
@@ -541,10 +603,13 @@ class TriangleDisplay:
 
         # Formatting
         ax.set_xlabel('Development Period')
-        ax.set_ylabel('Percentage of Ultimate (0-1 scale)')
+        ax.set_ylabel('% of Ultimate')
         ax.set_title('Development Pattern: Percentage of Ultimate')
         ax.grid(True, alpha=0.3)
-        ax.legend()
+        ax.legend(loc='lower right')
+
+        # Rotate x-axis labels to prevent crowding with many development periods
+        plt.xticks(rotation=45)
 
         # Set y-axis to 0-1 scale without percentage formatting
         ax.set_ylim(0, 1)
