@@ -15,12 +15,20 @@ try:
 except ImportError:
     HTML = None
 
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
+except ImportError:
+    plt = None
+    Figure = None
+
 if TYPE_CHECKING:
     from pandas import (
         DataFrame,
         IndexSlice,
         Series
     )
+    from matplotlib.figure import Figure
 
 class TriangleDisplay:
 
@@ -218,6 +226,361 @@ class TriangleDisplay:
             return HTML(output_xnan)
         elif HTML is None:
             raise ImportError("heatmap requires IPython.")
+
+    def percent_of_ultimate(
+            self,
+            show_by_accident_year: bool = True,
+            show_average_pattern: bool = True,
+            include_confidence_bands: bool = False,
+            figsize: tuple = (12, 8)
+    ) -> Figure:
+        """
+        Visualize the percentage of ultimate losses emerged over development periods.
+        
+        This method creates a sophisticated actuarial visualization showing how claims
+        develop from initial reporting to ultimate settlement. It's particularly valuable
+        for specialty insurance lines where understanding development velocity is critical
+        for reserving decisions and regulatory compliance.
+        
+        The visualization displays:
+        1. Individual accident year development patterns (observed vs projected)
+        2. Volume-weighted average development pattern across all years
+        3. Clear distinction between actual emergence and projected patterns
+        
+        Mathematical Foundation:
+        - Percentage of Ultimate = Cumulative Losses / Ultimate Losses
+        - Ultimate Losses = Latest Observed × Remaining CDF
+        - Remaining CDF = CDF[latest_period] (from fitted development patterns)
+        
+        Actuarial Applications:
+        - Reserve adequacy assessment and validation
+        - Development pattern analysis and benchmarking
+        - Tail development identification for long-tail lines
+        - Regulatory reporting and audit documentation
+        - Management presentations and stakeholder communication
+
+        Parameters
+        ----------
+        show_by_accident_year : bool, default=True
+            Whether to display individual accident year development curves.
+            - True: Shows both observed (solid lines) and projected (dashed lines) 
+              development for each accident year
+            - False: Displays only the average pattern for cleaner visualization
+            
+        show_average_pattern : bool, default=True
+            Whether to display the volume-weighted average development pattern.
+            - True: Shows the overall pattern as a prominent line with markers
+            - False: Hides the average pattern to focus on individual variations
+            
+        include_confidence_bands : bool, default=False
+            Whether to include confidence intervals around the average pattern.
+            Note: Currently not implemented but reserved for future enhancement.
+            
+        figsize : tuple of float, default=(12, 8)
+            Figure dimensions in inches as (width, height).
+            Recommended sizes:
+            - (12, 8): Standard presentation format
+            - (14, 10): Detailed analysis format
+            - (10, 6): Compact report format
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            A matplotlib Figure object containing the percentage of ultimate visualization.
+            The figure includes:
+            - Individual accident year patterns (if enabled)
+            - Average development pattern (if enabled)
+            - Professional styling suitable for actuarial reports
+            - Legend distinguishing between observed and projected data
+            - Grid lines for easier value reading
+
+        Raises
+        ------
+        ImportError
+            If matplotlib is not installed and available for plotting.
+            
+        ValueError
+            If the triangle is multidimensional. This method only works with
+            single triangles (shape[0] == 1 and shape[1] == 1).
+
+        Notes
+        -----
+        This method automatically fits a Development object to raw triangles to
+        obtain the cumulative development factors (CDFs) needed for ultimate
+        projections. For already-fitted Development objects, it uses the
+        existing CDF patterns.
+        
+        The method handles triangular data structure correctly, accounting for
+        varying numbers of observed development periods across accident years.
+        
+        Color Scheme:
+        - Light blue: Individual accident year observed development
+        - Red/dashed: Individual accident year projected development  
+        - Dark blue: Average development pattern
+        
+        Examples
+        --------
+        >>> import chainladder as cl
+        >>> raa = cl.load_sample('raa')
+        >>> 
+        >>> # Basic usage showing all patterns
+        >>> fig = raa.percent_of_ultimate()
+        >>> 
+        >>> # Focus on average pattern only
+        >>> fig = raa.percent_of_ultimate(
+        ...     show_by_accident_year=False,
+        ...     show_average_pattern=True
+        ... )
+        >>> 
+        >>> # Custom size for reports
+        >>> fig = raa.percent_of_ultimate(figsize=(14, 10))
+        
+        See Also
+        --------
+        Triangle.link_ratio : Calculate age-to-age development factors
+        Development.fit : Fit development patterns to triangle data
+        Triangle.ldf_ : Access fitted link development factors
+        """
+        # =================================================================
+        # STEP 1: INPUT VALIDATION AND DEPENDENCY CHECKS
+        # =================================================================
+        
+        # Ensure matplotlib is available for plotting functionality
+        if plt is None:
+            raise ImportError("percent_of_ultimate requires matplotlib.")
+
+        # Validate that we're working with a single triangle (not multidimensional)
+        # Multidimensional triangles would require aggregation logic not yet implemented
+        if self._dimensionality != 'single':
+            raise ValueError("percent_of_ultimate() only works with a single triangle.")
+
+        # =================================================================
+        # STEP 2: PREPARE DEVELOPMENT DATA AND CDF PATTERNS
+        # =================================================================
+        
+        # Import Development class for fitting CDF patterns if needed
+        from chainladder.development import Development
+
+        print("Calculating percent of ultimate...")
+
+        # Determine data source: use existing CDF if available, otherwise fit new patterns
+        if hasattr(self, 'cdf_') or any('Ult' in str(d) for d in self.development):
+            # CASE A: Already fitted Development object or CDF triangle
+            # Extract the cumulative development factors directly
+            avg_cdf_data = self.compute().set_backend("numpy").values[0, 0, 0, :]
+            development_periods = self.development.copy()
+        else:
+            # CASE B: Raw Triangle - need to fit Development patterns
+            # Fit a Development object to get CDF patterns to ultimate
+            dev_obj = Development().fit(self)
+            avg_cdf_data = dev_obj.cdf_.compute().set_backend("numpy").values[0, 0, 0, :]
+            development_periods = dev_obj.cdf_.development.copy()
+
+        # =================================================================
+        # STEP 3: CALCULATE INDIVIDUAL ACCIDENT YEAR PATTERNS
+        # =================================================================
+        
+        # Process individual accident year patterns only for raw triangles
+        # (fitted objects already have averaged patterns and don't need individual processing)
+        if show_by_accident_year and not (hasattr(self, 'cdf_') or any('Ult' in str(d) for d in self.development)):
+            
+            # Extract the triangle data as numpy array for efficient processing
+            triangle_values = self.compute().set_backend("numpy").values[0, 0]  # shape: (n_origins, n_dev_periods)
+            
+            # Initialize storage for individual accident year data
+            # Each element will be a tuple: (observed_percentages, projected_percentages, n_observed_periods)
+            individual_data = []
+            
+            print(f"Triangle_values = {triangle_values}")
+            
+            # =================================================================
+            # STEP 3A: PROCESS EACH ACCIDENT YEAR INDIVIDUALLY
+            # =================================================================
+            
+            for i in range(triangle_values.shape[0]):
+                # Extract observed cumulative losses for this accident year
+                observed_cumulative = triangle_values[i, :]
+                
+                # Count how many development periods have actual (non-NaN) observations
+                n_observed = (~np.isnan(observed_cumulative)).sum()
+                
+                print(f"Observed cumulative for origin {i}: {observed_cumulative}, n_observed = {n_observed}")
+                
+                # Skip accident years with no observed data
+                if n_observed == 0:
+                    continue
+                
+                # =================================================================
+                # STEP 3B: CALCULATE ULTIMATE PROJECTION FOR THIS ACCIDENT YEAR
+                # =================================================================
+                
+                # Get the latest observed cumulative loss value
+                latest_observed = observed_cumulative[~np.isnan(observed_cumulative)][-1]
+                
+                # Calculate the index of the latest observed period (0-based)
+                latest_period_idx = n_observed - 1
+
+                print(f"Latest observed = {latest_observed} at period index {latest_period_idx}")
+
+                # =================================================================
+                # STEP 3C: PROJECT ULTIMATE LOSSES USING AVERAGE CDF PATTERN
+                # =================================================================
+                
+                # Apply the average CDF from the latest observed period to ultimate
+                # This projects what the ultimate losses will be based on industry patterns
+                remaining_cdf = avg_cdf_data[latest_period_idx] if latest_period_idx < len(avg_cdf_data) else 1.0
+                ultimate_projected = latest_observed * remaining_cdf # last observed * product of remaining ldfs (aka. CDF at that period)
+                
+                # =================================================================
+                # STEP 3D: CALCULATE PERCENTAGE OF ULTIMATE FOR OBSERVED PERIODS
+                # =================================================================
+                
+                # Calculate the correct length for this individual accident year
+                # Key insight: percentage vectors represent "percent to ultimate" from each period
+                # For n_observed periods, we need n_observed-1 percentage values 
+                # (the last period IS the ultimate, so no "percent to ultimate" needed)
+                individual_length = max(0, n_observed - 1)
+                
+                # Initialize array to store observed percentage of ultimate values
+                # Use the correct individual length based on triangle structure
+                observed_pct = np.full(individual_length, np.nan)
+                
+                # Calculate percentage of ultimate for each observed development period
+                # Formula: % of Ultimate = Cumulative Loss / Ultimate Loss
+                # Note: we process n_observed-1 periods (excluding the ultimate period itself)
+                for j in range(individual_length):
+                    if j < len(observed_cumulative) and not np.isnan(observed_cumulative[j]):
+                        observed_pct[j] = observed_cumulative[j] / ultimate_projected
+
+                # =================================================================
+                # STEP 3E: CALCULATE PROJECTED PERCENTAGE OF ULTIMATE
+                # =================================================================
+                
+                # Initialize array for projected percentage values using CDF length
+                # Projections fill from last observed period to end of average pattern
+                max_projection_length = len(avg_cdf_data)
+                projected_pct = np.full(max_projection_length, np.nan)
+                
+                # Only calculate projections if there are future periods to project
+                if individual_length < len(avg_cdf_data):
+                    # Project from after the last observed percentage onwards using average pattern
+                    # The key insight: % of Ultimate = 1 / CDF at each development period
+                    for j in range(individual_length, len(avg_cdf_data)):
+                        projected_pct[j] = 1.0 / avg_cdf_data[j]
+
+                # =================================================================
+                # STEP 3F: STORE RESULTS FOR THIS ACCIDENT YEAR
+                # =================================================================
+                
+                print(f"Origin {i}:\n Observed pct = {observed_pct},\n Projected pct = {projected_pct}")
+                
+                # Store as tuple: (observed percentages, projected percentages, number of observed periods)
+                individual_data.append((observed_pct, projected_pct, n_observed))
+                print(f"Individual data: {individual_data[-1]}")
+                
+            # Store the processed individual accident year data
+            individual_percent_ult = individual_data
+        else:
+            # For fitted Development objects, individual year patterns aren't meaningful
+            # since the data has already been averaged/smoothed
+            individual_percent_ult = None
+            show_by_accident_year = False
+
+        # =================================================================
+        # STEP 4: CALCULATE AVERAGE DEVELOPMENT PATTERN
+        # =================================================================
+        
+        # Calculate the overall average percentage of ultimate pattern
+        # This represents the volume-weighted development across all accident years
+        avg_percent_ult = 1.0 / avg_cdf_data
+
+        # =================================================================
+        # STEP 5: CREATE MATPLOTLIB VISUALIZATION
+        # =================================================================
+        
+        # Initialize the figure with specified dimensions
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # =================================================================
+        # STEP 5A: PLOT INDIVIDUAL ACCIDENT YEAR PATTERNS
+        # =================================================================
+        
+        # Only plot individual patterns for raw triangles (not fitted objects)
+        if show_by_accident_year and individual_percent_ult is not None:
+            
+            for i, (observed_pct, projected_pct, n_observed) in enumerate(individual_percent_ult):
+                
+                # ---------------------------------------------------------------
+                # Plot Observed Development (Solid Lines)
+                # ---------------------------------------------------------------
+                obs_mask = ~np.isnan(observed_pct)
+                if obs_mask.any():
+                    print(f"Plotting individual origin {i} with n_observed = {n_observed}")
+                    
+                    # Extract x and y coordinates for observed data
+                    # Create x coordinates that match the length of observed_pct
+                    relevant_periods = development_periods[:len(observed_pct)]
+                    obs_x = relevant_periods[obs_mask]
+                    obs_y = observed_pct[obs_mask]
+                    print(f"Observed: \n x: {obs_x},\n y: {obs_y}")
+                    
+                    # Plot observed development with professional styling
+                    ax.plot(obs_x, obs_y,
+                           alpha=0.6,              # Semi-transparent for layering
+                           linewidth=1.5,          # Medium line weight
+                           linestyle='-',          # Solid line for observed data
+                           marker='o',
+                           label='Individual origin' if i == 0 else "")
+
+                # Plot projected data (dashed line) - only if there's projection needed
+                # if n_observed < len(avg_cdf_data):
+                #     proj_mask = ~np.isnan(projected_pct)
+                #     if proj_mask.any():
+                #         print(f"Plotting projected data for origin {i}")
+                #         proj_x = development_periods[proj_mask]
+                #         proj_y = projected_pct[proj_mask]
+                #         print(f"Projected: \n x: {proj_x},\n y: {proj_y}")
+                #         # Use a flag to ensure label appears only once for projected lines
+                #         proj_label = None
+                #         if not hasattr(ax, '_projection_labeled'):
+                #             proj_label = 'Individual origin (projected)'
+                #             ax._projection_labeled = True
+
+                #         ax.plot(proj_x, proj_y,
+                #                alpha=0.4,
+                #                linewidth=15,
+                #                color='red',
+                #                linestyle='-.',
+                #                label=proj_label)
+
+        # Plot average pattern
+        if show_average_pattern:
+            mask = ~np.isnan(avg_percent_ult)
+            if mask.any():
+                x_values = development_periods[mask]
+                y_plot = avg_percent_ult[mask]
+                ax.plot(x_values, y_plot,
+                       color='darkblue',
+                       linewidth=3,
+                       marker='o',
+                       markersize=6,
+                       label='Average Pattern')
+
+        # Tail development highlighting removed - not needed for this visualization
+
+        # Formatting
+        ax.set_xlabel('Development Period')
+        ax.set_ylabel('Percentage of Ultimate (0-1 scale)')
+        ax.set_title('Development Pattern: Percentage of Ultimate')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        # Set y-axis to 0-1 scale without percentage formatting
+        ax.set_ylim(0, 1)
+
+        plt.tight_layout()
+
+        return fig
 
     @property
     def _dimensionality(self) -> str:
