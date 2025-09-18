@@ -525,11 +525,53 @@ class TriangleDisplay:
         # =================================================================
         # STEP 4: CALCULATE AVERAGE DEVELOPMENT PATTERN
         # =================================================================
-        
-        # Calculate the overall average percentage of ultimate pattern
-        # This represents the average development pattern from CDF
-        # Note: For average pattern, percentage of ultimate = 1 / CDF (theoretical relationship)
-        avg_percent_ult = 1.0 / avg_cdf_data
+
+        # Calculate volume-weighted average percentage of ultimate pattern
+        # This should be consistent with individual accident year calculations
+        if not hasattr(self, 'cdf_') and not any('Ult' in str(d) for d in self.development):
+            # For raw triangles, calculate volume-weighted average from individual patterns
+            triangle_values = self.compute().set_backend("numpy").values[0, 0]
+
+            # Initialize arrays to store weighted sums and total weights for each development period
+            max_dev_periods = triangle_values.shape[1] - 1  # Exclude ultimate
+            weighted_sums = np.zeros(max_dev_periods)
+            total_weights = np.zeros(max_dev_periods)
+
+            for i in range(triangle_values.shape[0]):
+                observed_cumulative = triangle_values[i, :]
+                n_observed = (~np.isnan(observed_cumulative)).sum()
+
+                if n_observed <= 1:
+                    continue
+
+                # Calculate ultimate for this accident year (same logic as individual patterns)
+                latest_observed = observed_cumulative[~np.isnan(observed_cumulative)][-1]
+                latest_period_idx = n_observed - 1
+
+                if latest_period_idx < len(avg_cdf_data):
+                    cdf_to_ultimate = avg_cdf_data[latest_period_idx]
+                    ultimate_projected = latest_observed * cdf_to_ultimate
+                else:
+                    ultimate_projected = latest_observed
+
+                # Calculate percentage of ultimate for each observed period (excluding ultimate)
+                for j in range(n_observed - 1):
+                    if not np.isnan(observed_cumulative[j]) and j < max_dev_periods:
+                        pct_ultimate = observed_cumulative[j] / ultimate_projected
+                        weight = ultimate_projected  # Volume-weighted by ultimate size
+
+                        weighted_sums[j] += pct_ultimate * weight
+                        total_weights[j] += weight
+
+            # Calculate volume-weighted averages
+            avg_percent_ult = np.full(max_dev_periods, np.nan)
+            mask = total_weights > 0
+            avg_percent_ult[mask] = weighted_sums[mask] / total_weights[mask]
+
+        else:
+            # For fitted Development objects or CDF triangles, use the CDF inversion approach
+            # since individual patterns aren't meaningful for already-processed data
+            avg_percent_ult = 1.0 / avg_cdf_data
 
         # =================================================================
         # STEP 5: CREATE MATPLOTLIB VISUALIZATION
