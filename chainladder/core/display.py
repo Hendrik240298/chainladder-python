@@ -299,144 +299,108 @@ class TriangleDisplay:
 
         # Prepare development data
         from chainladder.development import Development
-
-        # Fit development patterns
         dev_obj = Development(average=average).fit(self)
         avg_cdf_data = dev_obj.cdf_.compute().set_backend("numpy").values[0, 0, 0]
         development_periods = dev_obj.cdf_.development.copy()
 
-        # Process selected origins
-        def _validate_and_process_origins(selected_origins):
-            if selected_origins is None:
-                return list(range(len(self.origin)))  # All origins
+        # Get triangle data once for all calculations
+        triangle_values = self.compute().set_backend("numpy").values[0, 0]
 
+        # Process selected origins (inline)
+        if selected_origins is None:
+            selected_origin_indices = list(range(len(self.origin)))
+        else:
             import warnings
             available_origins = [str(origin) for origin in self.origin]
-            selected_indices = []
-
-            for origin in selected_origins:
-                origin_str = str(origin)
-                if origin_str in available_origins:
-                    selected_indices.append(available_origins.index(origin_str))
-                else:
-                    warnings.warn(f"Origin {origin} not found in triangle data. Available origins: {available_origins}")
-
-            if not selected_indices:
+            selected_origin_indices = [
+                available_origins.index(str(origin))
+                for origin in selected_origins
+                if str(origin) in available_origins
+            ]
+            if not selected_origin_indices:
                 warnings.warn("No valid origins found in selection. Using all origins.")
-                return list(range(len(self.origin)))
+                selected_origin_indices = list(range(len(self.origin)))
 
-            return selected_indices
-
-        selected_origin_indices = _validate_and_process_origins(selected_origins)
-
-        # Calculate individual origin patterns
-        if show_by_origin:
-
-            triangle_values = self.compute().set_backend("numpy").values[0, 0]
-            individual_data = []
-
-            for i in range(triangle_values.shape[0]):
-                observed_cumulative = triangle_values[i, :]
-                n_observed = (~np.isnan(observed_cumulative)).sum()
-                if n_observed == 0:
-                    continue
-
-                # Calculate ultimate projection
+        # Calculate ultimate projections once for reuse
+        ultimate_projections = []
+        for i in range(triangle_values.shape[0]):
+            observed_cumulative = triangle_values[i, :]
+            n_observed = (~np.isnan(observed_cumulative)).sum()
+            if n_observed > 0:
                 latest_observed = observed_cumulative[~np.isnan(observed_cumulative)][-1]
                 latest_period_idx = n_observed - 1
                 if latest_period_idx < len(avg_cdf_data):
-                    cdf_to_ultimate = avg_cdf_data[latest_period_idx]
-                    ultimate_projected = latest_observed * cdf_to_ultimate
+                    ultimate_projected = latest_observed * avg_cdf_data[latest_period_idx]
                 else:
                     ultimate_projected = latest_observed
-                
-                # Calculate percentage of ultimate
-                if n_observed <= 1:
-                    # Skip origins with insufficient data
-                    continue
+            else:
+                ultimate_projected = np.nan
+            ultimate_projections.append(ultimate_projected)
 
-                observed_pct = []
+        # Calculate individual origin patterns
+        if show_by_origin:
+            individual_data = []
+            for i in range(triangle_values.shape[0]):
+                observed_cumulative = triangle_values[i, :]
+                n_observed = (~np.isnan(observed_cumulative)).sum()
+                ultimate_projected = ultimate_projections[i]
+
+                if n_observed <= 1 or np.isnan(ultimate_projected):
+                    continue
 
                 # Check if origin is complete
                 is_complete = (n_observed == triangle_values.shape[1] and
                               not np.isnan(observed_cumulative[-1]))
                 end_period = n_observed if is_complete else n_observed - 1
 
-                for j in range(end_period):
-                    if not np.isnan(observed_cumulative[j]):
-                        observed_pct.append(observed_cumulative[j] / ultimate_projected)
-                    else:
-                        observed_pct.append(np.nan)
-
-                # Store results
-
-                # Store as tuple: (observed percentages, number of observed periods)
-                # Note: No more projections stored
+                observed_pct = [
+                    observed_cumulative[j] / ultimate_projected if not np.isnan(observed_cumulative[j]) else np.nan
+                    for j in range(end_period)
+                ]
                 individual_data.append((observed_pct, n_observed))
-                
+
             individual_percent_ult = individual_data
         else:
             individual_percent_ult = None
 
         # Calculate average development pattern
-
-        # Calculate volume-weighted average pattern
-        triangle_values = self.compute().set_backend("numpy").values[0, 0]
-
         max_dev_periods = triangle_values.shape[1]
         weighted_sums = np.zeros(max_dev_periods)
         total_weights = np.zeros(max_dev_periods)
 
+        # Define weight function based on averaging method
+        def get_weight(ultimate_proj, cumulative_val):
+            if average == "volume":
+                return ultimate_proj
+            elif average in ["simple", "regression"]:
+                return 1.0
+            elif isinstance(average, (int, float)):
+                exponent = 2 - average
+                base_weight = cumulative_val if cumulative_val > 0 else 1.0
+                return base_weight ** (1 - exponent) if exponent != 1 else base_weight
+            else:
+                return ultimate_proj
+
         for i in range(triangle_values.shape[0]):
             observed_cumulative = triangle_values[i, :]
             n_observed = (~np.isnan(observed_cumulative)).sum()
+            ultimate_projected = ultimate_projections[i]
 
-            if n_observed <= 1:
+            if n_observed <= 1 or np.isnan(ultimate_projected):
                 continue
 
-            # Calculate ultimate for this origin
-            latest_observed = observed_cumulative[~np.isnan(observed_cumulative)][-1]
-            latest_period_idx = n_observed - 1
-
-            if latest_period_idx < len(avg_cdf_data):
-                cdf_to_ultimate = avg_cdf_data[latest_period_idx]
-                ultimate_projected = latest_observed * cdf_to_ultimate
-            else:
-                ultimate_projected = latest_observed
-
-            # Calculate percentage of ultimate
+            # Check if origin is complete
             is_complete = (n_observed == triangle_values.shape[1] and
                           not np.isnan(observed_cumulative[-1]))
-
-            # Handle complete vs incomplete origins
             end_period = n_observed if is_complete else n_observed - 1
 
             for j in range(end_period):
                 if not np.isnan(observed_cumulative[j]) and j < max_dev_periods:
                     pct_ultimate = observed_cumulative[j] / ultimate_projected
-
-                    # Apply weighting consistent with the chosen averaging method
-                    if average == "volume":
-                        weight = ultimate_projected  # Volume weighting
-                    elif average == "simple":
-                        weight = 1.0  # Simple (equal) weighting
-                    elif average == "regression":
-                        weight = 1.0  # Unweighted (same as simple for this calculation)
-                    else:  # Zehnwirth & Barnett numeric style
-                        # For numeric values, use a simplified weighting approach
-                        # This approximates the Development class behavior in the context of percentage calculation
-                        if isinstance(average, (int, float)):
-                            exponent = 2 - average
-                            # Use observed cumulative as base for weighting (similar to Development class logic)
-                            base_weight = observed_cumulative[j] if observed_cumulative[j] > 0 else 1.0
-                            weight = base_weight ** (1 - exponent) if exponent != 1 else base_weight
-                        else:
-                            weight = ultimate_projected  # Fallback to volume weighting
-
+                    weight = get_weight(ultimate_projected, observed_cumulative[j])
                     weighted_sums[j] += pct_ultimate * weight
                     total_weights[j] += weight
 
-        # Calculate weighted averages using the specified averaging method
         avg_percent_ult = np.full(max_dev_periods, np.nan)
         mask = total_weights > 0
         avg_percent_ult[mask] = weighted_sums[mask] / total_weights[mask]
@@ -446,101 +410,64 @@ class TriangleDisplay:
         fig, ax = plt.subplots(figsize=figsize)
 
         # Plot individual patterns
-        
-        # Plot individual patterns
         if show_by_origin and individual_percent_ult is not None:
+            # Prepare labels for all selected origins
+            if show_origin_years_in_legend or selected_origins is not None:
+                labels = [str(self.origin[i]) for i in selected_origin_indices]
+            else:
+                labels = ['Individual origin'] + [''] * (len(selected_origin_indices) - 1)
 
+            label_idx = 0
             for i, (observed_pct, n_observed) in enumerate(individual_percent_ult):
-
-                # Check if origin is selected
                 if i not in selected_origin_indices:
                     continue
 
-                # Plot observed development
                 if len(observed_pct) > 0:
                     observed_pct_array = np.array(observed_pct)
                     obs_mask = ~np.isnan(observed_pct_array)
 
                     if obs_mask.any():
-                        # Get development periods for this origin
                         n_available_periods = min(len(observed_pct), len(development_periods))
-                        relevant_periods = development_periods[:n_available_periods]
+                        obs_x = development_periods[:n_available_periods][obs_mask[:n_available_periods]]
+                        obs_y = observed_pct_array[:n_available_periods][obs_mask[:n_available_periods]]
 
-                        # Adjust mask
-                        obs_mask_adjusted = obs_mask[:n_available_periods]
-                        obs_x = relevant_periods[obs_mask_adjusted]
-                        obs_y = observed_pct_array[:n_available_periods][obs_mask_adjusted]
-
-                        # Handle ultimate period if present
-                        if len(observed_pct) > len(development_periods) and len(observed_pct) > n_available_periods:
+                        # Add ultimate period if available
+                        if len(observed_pct) > len(development_periods):
                             ultimate_idx = len(development_periods)
                             if ultimate_idx < len(observed_pct) and not np.isnan(observed_pct[ultimate_idx]):
-                                # Add ultimate point
                                 last_dev_period = development_periods.iloc[-1]
-                                if isinstance(last_dev_period, str):
-                                    ultimate_label = "Ult"
-                                else:
-                                    ultimate_label = f"{last_dev_period + 12}-Ult"
-                                # Extend with ultimate
+                                ultimate_label = "Ult" if isinstance(last_dev_period, str) else f"{last_dev_period + 12}-Ult"
                                 obs_x = list(obs_x) + [ultimate_label]
                                 obs_y = list(obs_y) + [observed_pct[ultimate_idx]]
 
-                        # Determine label
-                        if show_origin_years_in_legend or selected_origins is not None:
-                            origin_year = str(self.origin[i])
-                            label = origin_year
-                        else:
-                            first_selected_index = min(selected_origin_indices)
-                            label = 'Individual origin' if i == first_selected_index else ""
-
-                        # Plot observed development
-                        ax.plot(obs_x, obs_y,
-                               alpha=0.6,
-                               linewidth=1.5,
-                               linestyle='-',
-                               marker='o',
-                               markersize=4,
-                               label=label)
+                        ax.plot(obs_x, obs_y, alpha=0.6, linewidth=1.5, linestyle='-',
+                               marker='o', markersize=4, label=labels[label_idx])
+                        label_idx += 1
 
         # Plot average pattern
         if show_average_pattern:
             mask = ~np.isnan(avg_percent_ult)
             if mask.any():
-                # Handle potential length mismatch
                 n_plot_periods = min(len(development_periods), len(avg_percent_ult))
 
-                # Create plotting arrays
-                x_plot = []
-                y_plot = []
-
-                # Add development periods
-                for i in range(n_plot_periods):
-                    if not np.isnan(avg_percent_ult[i]):
-                        x_plot.append(development_periods.iloc[i])
-                        y_plot.append(avg_percent_ult[i])
+                # Build x and y arrays
+                x_plot = [development_periods.iloc[i] for i in range(n_plot_periods)
+                         if not np.isnan(avg_percent_ult[i])]
+                y_plot = [avg_percent_ult[i] for i in range(n_plot_periods)
+                         if not np.isnan(avg_percent_ult[i])]
 
                 # Add ultimate period if available
                 if len(avg_percent_ult) > len(development_periods):
                     ultimate_idx = len(development_periods)
                     if ultimate_idx < len(avg_percent_ult) and not np.isnan(avg_percent_ult[ultimate_idx]):
-                        # Create ultimate label
                         last_dev_period = development_periods.iloc[-1]
-                        if isinstance(last_dev_period, str):
-                            ultimate_label = "Ult"
-                        else:
-                            ultimate_label = f"{last_dev_period + 12}-Ult"
-
+                        ultimate_label = "Ult" if isinstance(last_dev_period, str) else f"{last_dev_period + 12}-Ult"
                         x_plot.append(ultimate_label)
                         y_plot.append(avg_percent_ult[ultimate_idx])
 
-                # Plot if we have data
                 if x_plot and y_plot:
-                    ax.plot(x_plot, y_plot,
-                           color='darkblue',
-                           linewidth=3,
-                           marker='o',
-                           markersize=6,
-                           label='Average Pattern')
+                    ax.plot(x_plot, y_plot, color='darkblue', linewidth=3,
+                           marker='o', markersize=6, label='Average Pattern')
 
         # Format plot
         ax.set_xlabel('Development Period')
