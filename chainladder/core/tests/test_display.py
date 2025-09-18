@@ -79,7 +79,7 @@ def test_percent_of_ultimate_options(raa):
     """The percent_of_ultimate method should handle various parameter options."""
     try:
         # Test with different parameter combinations
-        fig1 = raa.percent_of_ultimate(show_by_accident_year=False)
+        fig1 = raa.percent_of_ultimate(show_by_origin=False)
         assert fig1 is not None
         plt.close(fig1)
 
@@ -88,7 +88,7 @@ def test_percent_of_ultimate_options(raa):
         plt.close(fig2)
 
         fig3 = raa.percent_of_ultimate(
-            show_by_accident_year=True,
+            show_by_origin=True,
             show_average_pattern=True,
             figsize=(8, 6)
         )
