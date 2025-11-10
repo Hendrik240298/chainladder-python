@@ -25,6 +25,15 @@ class Development(DevelopmentBase):
         Options include 'log-linear' and 'mack'
     drop: tuple or list of tuples
         Drops specific origin/development combination(s)
+    smooth: tuple or list of tuples (default = None)
+        Applies curve fitting smoothing to age-to-age factors for specific
+        origin/development ranges. Each tuple can be:
+        - 3-tuple: (origin, dev_start, dev_end) - uses 'exponential' method by default
+        - 4-tuple: (origin, dev_start, dev_end, method) - specify method explicitly
+
+        Available methods: 'exponential', 'inverse_power', 'weibull'
+        Fits parametric curves to the specified origin's observed age-to-age pattern
+        and replaces with smoothed values using weighted log-linear regression.
     drop_high: bool, int, list of bools, or list of ints (default = None)
         Drops highest (by rank) link ratio(s) from LDF calculation
         If a boolean variable is passed, drop_high is set to 1, dropping only the
@@ -79,6 +88,7 @@ class Development(DevelopmentBase):
         drop=None,
         drop_high=None,
         drop_low=None,
+        smooth=None,
         preserve=1,
         drop_valuation=None,
         drop_above=np.inf,
@@ -96,6 +106,7 @@ class Development(DevelopmentBase):
         self.drop_above = drop_above
         self.drop_below = drop_below
         self.drop = drop
+        self.smooth = smooth
         self.fillna = fillna
         self.groupby = groupby
 
@@ -135,11 +146,18 @@ class Development(DevelopmentBase):
             ..., : X.shape[3] - 1
         ]
         x, y = tri_array[..., :-1], tri_array[..., 1:]
+        
         exponent = xp.array(
             [{"regression": 0, "volume": 1, "simple": 2}[x] for x in average_[0, 0, 0]]
         )
         exponent = xp.nan_to_num(exponent * (y * 0 + 1))
         link_ratio = y / x
+
+        # Apply smoothing to age-to-age factors
+        # This modifies x, y, link_ratio for WeightedRegression (affects aggregate LDF)
+        # AND stores smooth_weights_ for triangle display only (NOT used in regression)
+        if self.smooth is not None:
+            x, y, link_ratio = self._smooth(x, y, link_ratio, obj)
 
         if hasattr(X, "w_v2_"):
             self.w_v2_ = self._set_weight_func(
@@ -155,6 +173,11 @@ class Development(DevelopmentBase):
         self.w_ = self._assign_n_periods_weight(
             obj, n_periods_
         ) * self._drop_adjustment(obj, link_ratio)
+
+        # NOTE: smooth_weights_ is NOT applied here - it's only for triangle display
+        # Applying it here would double-count the smoothing effect since we already
+        # modified x, y, link_ratio above
+
         w = num_to_nan(self.w_ / (x ** (exponent)))
 
         params = WeightedRegression(axis=2, thru_orig=True, xp=xp).fit(x, y, w)
@@ -210,6 +233,7 @@ class Development(DevelopmentBase):
             "std_residuals_",
             "average_",
             "w_",
+            "smooth_weights_",  # For triangle display only
             "sigma_interpolation",
             "w_v2_",
         ]

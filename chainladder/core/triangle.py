@@ -505,8 +505,13 @@ class Triangle(TriangleBase):
             if not obj.is_full:
                 obj = obj[obj.valuation < obj.valuation_date]
             if hasattr(obj, "w_"):
+                # Apply drop weights (w_=0 for dropped values)
                 w_ = obj.w_[..., : len(obj.odims), :]
                 obj = obj * w_ if obj.shape == w_.shape else obj
+            if hasattr(obj, "smooth_weights_") and obj.smooth_weights_ is not None:
+                # Apply smooth scaling weights separately (for display only)
+                smooth_w_ = obj.smooth_weights_[..., : len(obj.odims), :]
+                obj = obj * smooth_w_ if obj.shape == smooth_w_.shape else obj
             obj.is_pattern = True
             obj.is_cumulative = False
             obj.values = num_to_nan(obj.values)
