@@ -517,6 +517,19 @@ class Triangle(TriangleBase):
 
     @property
     def age_to_age(self):
+        """
+        Displays age-to-age ratios for the triangle. If the triangle has been fit with a
+        development model (e.g., Development, BarnettZehnwirth), this will return the smoothed
+        age-to-age factors (ldf_). Otherwise, it returns the raw link ratios.
+
+        Returns
+        -------
+        Triangle object representing age-to-age factors.
+        """
+        # If triangle has been fit with a development model, return the smoothed factors
+        if hasattr(self, 'ldf_') and self.ldf_ is not None:
+            return self.ldf_
+        # Otherwise, return the raw link ratios
         return self.link_ratio
 
     def incr_to_cum(self, inplace=False):

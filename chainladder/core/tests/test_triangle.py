@@ -770,3 +770,19 @@ def test_latest_diagonal_vs_full_tri_clrd(clrd):
     full_tri = model.full_triangle_
 
     assert np.round(full_tri.latest_diagonal, 0) == np.round(ult.latest_diagonal, 0)
+
+
+def test_age_to_age_with_development_smoothing(raa):
+    """Test that age_to_age returns smoothed ldf_ after Development fitting.
+
+    This test addresses issue #1: age-to-age smoothing should be reflected
+    in heatmaps and when accessing .age_to_age property.
+    """
+    # Fit with Development model
+    dev = cl.Development(average='volume').fit_transform(raa)
+
+    # After fitting, age_to_age should return the smoothed ldf_
+    assert np.allclose(dev.age_to_age.values, dev.ldf_.values)
+
+    # Raw triangle should still return raw link ratios
+    assert not np.allclose(raa.age_to_age.values, dev.ldf_.values)
