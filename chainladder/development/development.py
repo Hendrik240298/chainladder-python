@@ -26,14 +26,17 @@ class Development(DevelopmentBase):
     drop: tuple or list of tuples
         Drops specific origin/development combination(s)
     smooth: tuple or list of tuples (default = None)
-        Applies curve fitting smoothing to age-to-age factors for specific
-        origin/development ranges. Each tuple can be:
-        - 3-tuple: (origin, dev_start, dev_end) - uses 'exponential' method by default
-        - 4-tuple: (origin, dev_start, dev_end, method) - specify method explicitly
+        Applies linear interpolation smoothing to cumulative values for specific
+        origin/development ranges. Each tuple specifies:
+        - 3-tuple: (origin, dev_start, dev_end)
 
-        Available methods: 'exponential', 'inverse_power', 'weibull'
-        Fits parametric curves to the specified origin's observed age-to-age pattern
-        and replaces with smoothed values using weighted log-linear regression.
+        The smoothing calculation linearly interpolates cumulative values across
+        the range between the start and end boundaries, then recalculates
+        age-to-age factors from these pseudo triangle values. This produces
+        smoothly declining factors without requiring parametric assumptions.
+
+        Example: smooth=[('2002', 18, 36)] smooths accident year 2002
+        from age 18 to 36 by linearly interpolating cumulative losses.
     drop_high: bool, int, list of bools, or list of ints (default = None)
         Drops highest (by rank) link ratio(s) from LDF calculation
         If a boolean variable is passed, drop_high is set to 1, dropping only the

@@ -340,10 +340,15 @@ class DevelopmentBase(BaseEstimator, TransformerMixin, EstimatorIO, Common):
         return arr[:, :-1]
 
     def _smooth(self, x, y, link_ratio, X):
-        """Apply curve fitting smoothing to age-to-age factors.
+        """Apply linear interpolation smoothing to cumulative values.
 
-        Fits parametric curves (exponential, inverse_power, weibull) to
-        observed age-to-age factors and replaces them with smoothed values.
+        For each smoothed block, linearly interpolates cumulative values between
+        the boundaries, then recalculates age-to-age factors from the interpolated
+        pseudo-cumulative values.
+
+        This approach calculates pseudo triangle values by doing a linear
+        interpolation across the range of the smoothed block. The ratios are
+        then calculated from the pseudo triangle values.
 
         Parameters
         ----------
@@ -361,7 +366,7 @@ class DevelopmentBase(BaseEstimator, TransformerMixin, EstimatorIO, Common):
         tuple
             (x_smooth, y_smooth, link_ratio_smooth) with smoothed values
         """
-                
+
         if self.smooth is None:
             return x, y, link_ratio
 
@@ -372,108 +377,87 @@ class DevelopmentBase(BaseEstimator, TransformerMixin, EstimatorIO, Common):
         y_smooth = y.copy()
         link_ratio_smooth = link_ratio.copy()
 
+        # Initialize smooth_weights_ for display purposes
+        if not hasattr(self, 'smooth_weights_'):
+            self.smooth_weights_ = xp.ones_like(link_ratio_smooth)
+
         dev_labels = X.development[:-1]
 
         for item in smooth:
-            # Handle both 3-tuple and 4-tuple formats
-            if len(item) == 3:
-                origin_str, dev_start, dev_end = item
-                method = 'exponential'  # default
-            elif len(item) == 4:
-                origin_str, dev_start, dev_end, method = item
-            else:
+            # Parse 3-tuple format: (origin, dev_start, dev_end)
+            # dev_start: starting age of FIRST link ratio to smooth
+            # dev_end: starting age of LAST link ratio to smooth (INCLUSIVE)
+            if len(item) != 3:
                 raise ValueError(
-                    "smooth tuple must be (origin, dev_start, dev_end) or "
-                    "(origin, dev_start, dev_end, method)"
+                    "smooth tuple must be (origin, dev_start, dev_end)"
                 )
 
-            # Validate method
-            if method not in ['exponential', 'inverse_power', 'weibull']:
-                raise ValueError(
-                    f"Invalid smooth method '{method}'. "
-                    "Must be 'exponential', 'inverse_power', or 'weibull'."
-                )
+            origin_str, dev_start, dev_end = item
 
             # Find indices
             origin_idx = np.where(X.origin == origin_str)[0][0]
             dev_start_idx = np.where(dev_labels == dev_start)[0][0]
             dev_end_idx = np.where(dev_labels == dev_end)[0][0]
 
-            if False:  # Debug output
-                print(f"Smoothing origin {origin_str}, ages {dev_start}-{dev_end}, method {method}")
-                print(f"  Indices: origin={origin_idx}, dev_start={dev_start_idx}, dev_end={dev_end_idx}")
-                print(f"  Number of periods to smooth: {dev_end_idx - dev_start_idx + 1}")
+            # Number of link ratios to smooth (inclusive range)
+            # Example: dev_start=18, dev_end=30 smooths LDFs starting at 18, 21, 24, 27, 30
+            n_link_ratios = dev_end_idx - dev_start_idx + 1
 
-            # Extract factors for this specific origin over the range
-            factors = link_ratio_smooth[:, :, origin_idx:origin_idx+1, dev_start_idx:dev_end_idx+1]
-
-            # Prepare for curve fitting
-            _y = factors.copy()
-            _w = xp.ones(_y.shape)
-
-            # Handle factors <= 1.0 (adapted from TailCurve logic)
-            lower_threshold = 1.00001
-            _w[_y <= lower_threshold] = 0
-            _y[_y <= lower_threshold] = 1.01
-
-            # Transform to log scale (adapted from TailCurve lines 170-173)
-            if method == 'weibull':
-                _y = xp.log(xp.log(_y / (_y - 1)))
-            else:
-                _y = xp.log(_y - 1)
-
-            # Get x values for regression (adapted from TailCurve lines 195-202)
-            if method == "exponential":
-                _x = None  # x inferred from axis
-            elif method in ("inverse_power", "weibull"):
-                reg = WeightedRegression(3, False, xp=xp).fit(None, _y, _w).infer_x_w()
-                _x = xp.log(reg.x)
-
-            # Fit weighted regression (axis=3 for development periods)
-            coefs = WeightedRegression(axis=3, xp=xp).fit(_x, _y, _w)
-            slope, intercept = coefs.slope_, coefs.intercept_
-
-            # Generate smoothed factors (adapted from TailCurve lines 204-213)
-            n_periods = dev_end_idx - dev_start_idx + 1
-            ages = xp.arange(1, n_periods + 1)[None, None, None, :]
-
-            if method == "exponential":
-                smoothed_factors = xp.exp(slope * ages + intercept) + 1
-            elif method == "inverse_power":
-                smoothed_factors = xp.exp(intercept) * (ages ** slope) + 1
-            elif method == "weibull":
-                smoothed_factors = 1 / (1 - xp.exp(-xp.exp(intercept) * ages**slope))
-
-            # Calculate weights to scale original factors to smoothed factors
-            # weight = smoothed_factor / original_factor
-            # This allows us to use the existing w_ mechanism
-            original_factors = factors.copy()
-            scaling_weights = smoothed_factors / original_factors
-
-            # Store scaling weights (we'll combine with w_ later)
-            if not hasattr(self, 'smooth_weights_'):
-                self.smooth_weights_ = xp.ones_like(link_ratio_smooth)
-
-            # Apply smoothed factors to link ratios BETWEEN the start and end ages
-            # For ages 18-24, we smooth link ratios 18->21 and 21->24 (NOT 24->27)
-            # So we use indices [dev_start_idx:dev_end_idx], which excludes the end
-            n_link_ratios = dev_end_idx - dev_start_idx
-            self.smooth_weights_[:, :, origin_idx, dev_start_idx:dev_start_idx+n_link_ratios] = scaling_weights[:, :, :, :n_link_ratios]
-
-            # Replace with smoothed values for the regression
-            link_ratio_smooth[:, :, origin_idx, dev_start_idx:dev_start_idx+n_link_ratios] = smoothed_factors[:, :, :, :n_link_ratios]
-
-            # Reconstruct x and y to maintain cumulative consistency
-            # Start from the first smoothed period and cascade through the range
-            for j in range(dev_start_idx, dev_start_idx + n_link_ratios):
-                # Recalculate y at position j using smoothed link ratio
-                y_smooth[:, :, origin_idx, j] = (
-                    x_smooth[:, :, origin_idx, j] * link_ratio_smooth[:, :, origin_idx, j]
+            # Validate minimum 2 link ratios (3 cumulative values) for interpolation
+            if n_link_ratios < 2:
+                raise ValueError(
+                    f"Smoothing requires at least 2 link ratios (3 cumulative values). "
+                    f"Got {n_link_ratios} link ratio(s) from age {dev_start} to {dev_end} (inclusive). "
+                    f"Please specify an end age at least one development period after the start."
                 )
-                # Only propagate to next x if we're still within the smoothed range
-                # This prevents cascading beyond the intended smoothing range
-                if j + 1 < dev_start_idx + n_link_ratios and j + 1 < x_smooth.shape[-1]:
-                    x_smooth[:, :, origin_idx, j + 1] = y_smooth[:, :, origin_idx, j]
+
+            # Extract boundary cumulative values
+            # Start boundary: cumulative at the beginning of the first period
+            cum_start = x_smooth[:, :, origin_idx, dev_start_idx]
+
+            # End boundary: cumulative at the end of the last period (dev_end_idx)
+            cum_end = y_smooth[:, :, origin_idx, dev_end_idx]
+
+            # Linearly interpolate cumulative values
+            # We need n_link_ratios + 1 cumulative values (including start and end)
+            for i in range(n_link_ratios + 1):
+                # Linear interpolation weight
+                weight = i / n_link_ratios
+
+                # Interpolated cumulative value
+                cum_interp = cum_start + weight * (cum_end - cum_start)
+
+                # Position in the arrays
+                pos = dev_start_idx + i
+
+                # Update x and y
+                if i < n_link_ratios:
+                    # x[pos] is the cumulative at the start of period pos
+                    x_smooth[:, :, origin_idx, pos] = cum_interp
+
+                if i > 0:
+                    # y[pos-1] is the cumulative at the end of period pos-1
+                    # which is the same as the cumulative at the start of period pos
+                    y_smooth[:, :, origin_idx, pos - 1] = cum_interp
+
+            # Recalculate link ratios from interpolated cumulative values
+            for j in range(dev_start_idx, dev_start_idx + n_link_ratios):
+                link_ratio_smooth[:, :, origin_idx, j] = (
+                    y_smooth[:, :, origin_idx, j] / x_smooth[:, :, origin_idx, j]
+                )
+
+            # Store scaling weights for display purposes
+            # This allows the triangle.link_ratio property to show smoothed values in heatmaps
+            for j in range(dev_start_idx, dev_start_idx + n_link_ratios):
+                original_lr = link_ratio[:, :, origin_idx, j]
+                smoothed_lr = link_ratio_smooth[:, :, origin_idx, j]
+                # Avoid division by zero
+                mask = original_lr != 0
+                self.smooth_weights_[:, :, origin_idx, j] = xp.where(
+                    mask,
+                    smoothed_lr / original_lr,
+                    1.0
+                )
 
         return x_smooth, y_smooth, link_ratio_smooth
 
