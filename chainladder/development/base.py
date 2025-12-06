@@ -346,10 +346,6 @@ class DevelopmentBase(BaseEstimator, TransformerMixin, EstimatorIO, Common):
         the boundaries, then recalculates age-to-age factors from the interpolated
         pseudo-cumulative values.
 
-        This approach calculates pseudo triangle values by doing a linear
-        interpolation across the range of the smoothed block. The ratios are
-        then calculated from the pseudo triangle values.
-
         Parameters
         ----------
         x : array
@@ -366,12 +362,11 @@ class DevelopmentBase(BaseEstimator, TransformerMixin, EstimatorIO, Common):
         tuple
             (x_smooth, y_smooth, link_ratio_smooth) with smoothed values
         """
-
         if self.smooth is None:
             return x, y, link_ratio
 
         xp = X.get_array_module()
-        smooth = [self.smooth] if type(self.smooth) is not list else self.smooth
+        smooth = [self.smooth] if not isinstance(self.smooth, list) else self.smooth
 
         x_smooth = x.copy()
         y_smooth = y.copy()
@@ -384,80 +379,50 @@ class DevelopmentBase(BaseEstimator, TransformerMixin, EstimatorIO, Common):
         dev_labels = X.development[:-1]
 
         for item in smooth:
-            # Parse 3-tuple format: (origin, dev_start, dev_end)
-            # dev_start: starting age of FIRST link ratio to smooth
-            # dev_end: starting age of LAST link ratio to smooth (INCLUSIVE)
             if len(item) != 3:
-                raise ValueError(
-                    "smooth tuple must be (origin, dev_start, dev_end)"
-                )
+                raise ValueError("smooth tuple must be (origin, dev_start, dev_end)")
 
             origin_str, dev_start, dev_end = item
 
             # Find indices
-            origin_idx = np.where(X.origin == origin_str)[0][0]
+            origin_idx = np.where(X.origin.astype(str) == str(origin_str))[0][0]
             dev_start_idx = np.where(dev_labels == dev_start)[0][0]
             dev_end_idx = np.where(dev_labels == dev_end)[0][0]
 
-            # Number of link ratios to smooth (inclusive range)
-            # Example: dev_start=18, dev_end=30 smooths LDFs starting at 18, 21, 24, 27, 30
             n_link_ratios = dev_end_idx - dev_start_idx + 1
 
-            # Validate minimum 2 link ratios (3 cumulative values) for interpolation
             if n_link_ratios < 2:
                 raise ValueError(
                     f"Smoothing requires at least 2 link ratios (3 cumulative values). "
-                    f"Got {n_link_ratios} link ratio(s) from age {dev_start} to {dev_end} (inclusive). "
-                    f"Please specify an end age at least one development period after the start."
+                    f"Got {n_link_ratios} from age {dev_start} to {dev_end}."
                 )
 
             # Extract boundary cumulative values
-            # Start boundary: cumulative at the beginning of the first period
             cum_start = x_smooth[:, :, origin_idx, dev_start_idx]
-
-            # End boundary: cumulative at the end of the last period (dev_end_idx)
             cum_end = y_smooth[:, :, origin_idx, dev_end_idx]
 
-            # Linearly interpolate cumulative values
-            # We need n_link_ratios + 1 cumulative values (including start and end)
-            for i in range(n_link_ratios + 1):
-                # Linear interpolation weight
-                weight = i / n_link_ratios
+            # Vectorized linear interpolation
+            weights = xp.linspace(0, 1, n_link_ratios + 1)
+            cum_interp = cum_start[..., None] + weights * (cum_end - cum_start)[..., None]
 
-                # Interpolated cumulative value
-                cum_interp = cum_start + weight * (cum_end - cum_start)
+            # Update x and y with interpolated values
+            x_smooth[:, :, origin_idx, dev_start_idx:dev_end_idx + 1] = cum_interp[..., :-1]
+            y_smooth[:, :, origin_idx, dev_start_idx:dev_end_idx + 1] = cum_interp[..., 1:]
 
-                # Position in the arrays
-                pos = dev_start_idx + i
+            # Recalculate link ratios (vectorized)
+            idx_slice = slice(dev_start_idx, dev_end_idx + 1)
+            link_ratio_smooth[:, :, origin_idx, idx_slice] = (
+                y_smooth[:, :, origin_idx, idx_slice] / x_smooth[:, :, origin_idx, idx_slice]
+            )
 
-                # Update x and y
-                if i < n_link_ratios:
-                    # x[pos] is the cumulative at the start of period pos
-                    x_smooth[:, :, origin_idx, pos] = cum_interp
-
-                if i > 0:
-                    # y[pos-1] is the cumulative at the end of period pos-1
-                    # which is the same as the cumulative at the start of period pos
-                    y_smooth[:, :, origin_idx, pos - 1] = cum_interp
-
-            # Recalculate link ratios from interpolated cumulative values
-            for j in range(dev_start_idx, dev_start_idx + n_link_ratios):
-                link_ratio_smooth[:, :, origin_idx, j] = (
-                    y_smooth[:, :, origin_idx, j] / x_smooth[:, :, origin_idx, j]
-                )
-
-            # Store scaling weights for display purposes
-            # This allows the triangle.link_ratio property to show smoothed values in heatmaps
-            for j in range(dev_start_idx, dev_start_idx + n_link_ratios):
-                original_lr = link_ratio[:, :, origin_idx, j]
-                smoothed_lr = link_ratio_smooth[:, :, origin_idx, j]
-                # Avoid division by zero
-                mask = original_lr != 0
-                self.smooth_weights_[:, :, origin_idx, j] = xp.where(
-                    mask,
-                    smoothed_lr / original_lr,
-                    1.0
-                )
+            # Store scaling weights for display (vectorized)
+            original_lr = link_ratio[:, :, origin_idx, idx_slice]
+            smoothed_lr = link_ratio_smooth[:, :, origin_idx, idx_slice]
+            self.smooth_weights_[:, :, origin_idx, idx_slice] = xp.where(
+                original_lr != 0,
+                smoothed_lr / original_lr,
+                1.0
+            )
 
         return x_smooth, y_smooth, link_ratio_smooth
 
